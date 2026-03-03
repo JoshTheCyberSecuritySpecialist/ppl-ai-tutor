@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+openai
+pydantic
+pydantic-settings
+python-dotenv
+pytest
+python-jose[cryptography]
+passlib[bcrypt]

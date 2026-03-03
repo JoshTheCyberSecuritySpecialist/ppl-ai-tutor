@@ -1,0 +1,39 @@
+name: Build and Deploy PPL AI Tutor
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  AZURE_CONTAINER_REGISTRY: yourregistryname
+  CONTAINER_APP_NAME: ppl-ai-tutor
+  RESOURCE_GROUP: ppl-ai-rg
+  IMAGE_NAME: ppl-ai-tutor
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+
+      - name: Build and Push Docker Image
+        run: |
+          az acr build \
+            --registry $AZURE_CONTAINER_REGISTRY \
+            --image $IMAGE_NAME:${{ github.sha }} \
+            .
+
+      - name: Update Container App
+        run: |
+          az containerapp update \
+            --name $CONTAINER_APP_NAME \
+            --resource-group $RESOURCE_GROUP \
+            --image $AZURE_CONTAINER_REGISTRY.azurecr.io/$IMAGE_NAME:${{ github.sha }}
