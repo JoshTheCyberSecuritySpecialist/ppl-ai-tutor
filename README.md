@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/JoshTheCyberSecuritySpecialist/ppl-ai-tutor/main/docs/banner.svg" width="100%" />
+  <img src="./docs/banner.png" width="100%" />
 </p>
 
 ---
