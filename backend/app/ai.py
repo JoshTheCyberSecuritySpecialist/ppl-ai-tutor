@@ -3,6 +3,7 @@ from openai import OpenAI
 from app.auth import verify_token
 from app.config import settings
 from app.db import supabase
+from app.services.vector_service import fetch_acs_context
 import json
 
 router = APIRouter()
@@ -44,6 +45,39 @@ def calc_session_avg(user: str, session_id: str) -> float:
     return round(sum(scores) / len(scores), 2) if scores else 0.0
 
 
+def build_acs_context_block(acs_rows: list[dict]) -> str:
+    """
+    Format FAA ACS rows into a text block suitable as LLM context.
+    """
+    if not acs_rows:
+        return ""
+
+    blocks: list[str] = []
+    for item in acs_rows:
+        code = item.get("code", "")
+        area = item.get("area") or ""
+        task = item.get("task") or ""
+        knowledge_element = item.get("knowledge_element") or ""
+        description = item.get("description") or ""
+
+        block_lines = []
+        if code:
+            header = f"{code}"
+            if area:
+                header += f" — {area}"
+            block_lines.append(header)
+        if task:
+            block_lines.append(f"Task: {task}")
+        if knowledge_element:
+            block_lines.append(f"Knowledge Element: {knowledge_element}")
+        if description:
+            block_lines.append(description)
+
+        blocks.append("\n".join(block_lines).strip())
+
+    return "\n\n---\n\n".join(b for b in blocks if b)
+
+
 @router.post("/ask")
 def ask_ai(
     question: str,
@@ -67,6 +101,12 @@ def ask_ai(
     if mode == "dpe":
         difficulty = int(session.get("difficulty", 1))
         timed_seconds = session.get("timed_seconds")
+
+        # Retrieve FAA ACS context based on the user's input (if not starting)
+        acs_context_block = ""
+        if question.lower().strip() != "start":
+            acs_rows = fetch_acs_context(question, k=5)
+            acs_context_block = build_acs_context_block(acs_rows)
 
         # Step 1: Start scenario
         if question.lower().strip() == "start":
@@ -110,6 +150,14 @@ Make it immersive and specific.
 You are an FAA Designated Pilot Examiner conducting a Private Pilot oral exam.
 
 Difficulty level: {difficulty}/5.
+
+You have access to FAA Airman Certification Standards (ACS) reference material.
+Use the following ACS context as primary ground truth when evaluating the student's answer.
+If the student's answer conflicts with the ACS, prioritize the ACS.
+
+[BEGIN FAA ACS CONTEXT]
+{acs_context_block}
+[END FAA ACS CONTEXT]
 
 Evaluate the student's answer.
 
@@ -222,13 +270,24 @@ Knowledge Element: {item.get("knowledge_element")}
     # =========================
     # NORMAL MODE
     # =========================
-    system_prompt = """
+    # Retrieve FAA ACS context for the question and feed it to the model.
+    acs_rows = fetch_acs_context(question, k=5)
+    acs_context_block = build_acs_context_block(acs_rows)
+
+    system_prompt = f"""
 You are an expert FAA Private Pilot instructor.
 
 Provide:
 - Clear structured explanations
 - Practical examples
 - Reference FAA standards when appropriate
+
+You are provided with FAA Airman Certification Standards (ACS) context.
+Use the ACS context as authoritative source material and cite relevant codes when helpful.
+
+[BEGIN FAA ACS CONTEXT]
+{acs_context_block}
+[END FAA ACS CONTEXT]
 """
 
     response = client.chat.completions.create(
