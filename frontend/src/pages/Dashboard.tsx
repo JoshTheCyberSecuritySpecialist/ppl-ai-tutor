@@ -2,9 +2,25 @@ import { useState, useEffect, useRef } from "react";
 import axios from "axios";
 import ReactMarkdown from "react-markdown";
 import { useNavigate } from "react-router-dom";
+import { AircraftSelector as AirframeSelector } from "../components/aircraft/AircraftSelector.jsx";
+import { AircraftViewer } from "../components/aircraft/AircraftViewer.jsx";
+import { CockpitHotspots } from "../components/aircraft/CockpitHotspots.jsx";
+import { AircraftSelector as CockpitAircraftSelector } from "../components/cockpit/AircraftSelector.jsx";
+import { CockpitPanel } from "../components/cockpit/CockpitPanel.jsx";
+import { InstrumentInfoPanel } from "../components/cockpit/InstrumentInfoPanel.jsx";
+import { C172Cockpit } from "../components/cockpit172/C172Cockpit.jsx";
 
 type Message = { role: "user" | "assistant"; content: string };
 type Mode = "normal" | "dpe";
+
+type CockpitSimTab = "trainer" | "viewer" | "study";
+
+type Aircraft = {
+  id: string;
+  name: string;
+  type: string;
+  callsign: string;
+};
 
 export default function Dashboard() {
   const [question, setQuestion] = useState("");
@@ -22,6 +38,17 @@ export default function Dashboard() {
   const [timedOn, setTimedOn] = useState(false);
   const [timedSeconds, setTimedSeconds] = useState(60);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
+
+  // Training aircraft: IDs must match AircraftSelector, CockpitHotspots, CockpitPanel (c172, archer, da40).
+  const aircraftOptions: Aircraft[] = [
+    { id: "c172", name: "Cessna 172S", type: "Single Engine", callsign: "N172JT" },
+    { id: "archer", name: "Piper Archer", type: "Cross-country trainer", callsign: "N28PP" },
+    { id: "da40", name: "Diamond DA40", type: "TAA / glass cockpit", callsign: "N40DA" },
+  ];
+  const [selectedAircraft, setSelectedAircraft] = useState<string>(aircraftOptions[0]?.id ?? "c172");
+  const [selectedInstrument, setSelectedInstrument] = useState<string>("attitude");
+  const [totalQuestions, setTotalQuestions] = useState(0);
+  const [cockpitSimTab, setCockpitSimTab] = useState<CockpitSimTab>("trainer");
 
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const navigate = useNavigate();
@@ -50,6 +77,7 @@ export default function Dashboard() {
     setSessionAvg(0);
     setMessages([]);
     setQuestion("");
+    setTotalQuestions(0);
 
     // start DPE with a scenario immediately
     if (m === "dpe") {
@@ -132,6 +160,7 @@ export default function Dashboard() {
     const userMessage: Message = { role: "user", content: outgoing };
     setMessages((prev) => [...prev, userMessage]);
     setQuestion("");
+    setTotalQuestions((prev) => prev + 1);
 
     const startedAt = Date.now();
 
@@ -180,16 +209,28 @@ export default function Dashboard() {
   };
 
   return (
-    <div style={styles.container}>
-      <div style={styles.content}>
-        <div style={styles.topBar}>
-          <h2 style={styles.title}>Private Pilot AI</h2>
-          <div style={styles.topRight}>
-            <button style={styles.smallBtn} onClick={() => navigate("/analytics")}>
-              Analytics
+    <div className="min-h-screen w-full text-slate-100">
+      <div className="mx-auto flex min-h-screen max-w-7xl flex-col px-4 py-6 md:px-8">
+        {/* Top navigation bar */}
+        <header className="mb-6 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-blue-500/20 ring-1 ring-blue-400/60 shadow-soft-glow">
+              <span className="text-xl font-semibold text-blue-300">AI</span>
+            </div>
+            <div>
+              <h1 className="text-lg font-semibold tracking-tight md:text-2xl">AI Pilot Tutor</h1>
+              <p className="text-xs text-slate-300 md:text-sm">Modern training cockpit for private pilots</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              className="rounded-lg border border-slate-700 bg-slate-900/60 px-3 py-2 text-xs font-medium text-slate-200 hover:border-blue-500 hover:text-blue-200 md:text-sm"
+              onClick={() => navigate("/analytics")}
+            >
+              Flight Analytics
             </button>
             <button
-              style={styles.smallBtn}
+              className="rounded-lg bg-red-500/90 px-3 py-2 text-xs font-semibold text-white shadow hover:bg-red-400 md:text-sm"
               onClick={() => {
                 localStorage.removeItem("token");
                 navigate("/");
@@ -198,223 +239,366 @@ export default function Dashboard() {
               Logout
             </button>
           </div>
-        </div>
+        </header>
 
-        {/* MODE SELECTOR */}
-        <div style={styles.modeSelector}>
-          <button
-            onClick={() => setMode("normal")}
-            style={mode === "normal" ? styles.activeMode : styles.modeButton}
-          >
-            Study Mode
-          </button>
-
-          <button
-            onClick={() => setMode("dpe")}
-            style={mode === "dpe" ? styles.activeMode : styles.modeButton}
-          >
-            🎤 DPE Oral Exam
-          </button>
-        </div>
-
-        {/* DPE HUD */}
-        {mode === "dpe" && (
-          <div style={styles.hud}>
-            <div>
-              <div style={styles.hudLabel}>Difficulty</div>
-              <div style={styles.hudValue}>{difficulty}/5</div>
+        {/* Mode + scenario bar */}
+        <section className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-800 bg-slate-900/70 px-4 py-3 backdrop-blur">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex gap-2 rounded-full bg-slate-900/80 p-1 text-xs md:text-sm">
+              <button
+                onClick={() => setMode("normal")}
+                className={`rounded-full px-3 py-1.5 font-medium transition ${
+                  mode === "normal"
+                    ? "bg-blue-500 text-white shadow-soft-glow"
+                    : "text-slate-300 hover:bg-slate-800"
+                }`}
+              >
+                Study Mode
+              </button>
+              <button
+                onClick={() => setMode("dpe")}
+                className={`flex items-center gap-1.5 rounded-full px-3 py-1.5 font-medium transition ${
+                  mode === "dpe"
+                    ? "bg-amber-500 text-slate-950 shadow-soft-glow"
+                    : "text-slate-300 hover:bg-slate-800"
+                }`}
+              >
+                <span>🎤</span>
+                <span>DPE Oral Exam</span>
+              </button>
             </div>
-            <div>
-              <div style={styles.hudLabel}>Session Avg</div>
-              <div style={styles.hudValue}>{sessionAvg}/10</div>
-            </div>
+            {mode === "dpe" && (
+              <div className="flex items-center gap-4 text-xs text-slate-300 md:text-sm">
+                <div>
+                  <span className="uppercase tracking-wide text-slate-400">Difficulty</span>
+                  <div className="font-semibold text-slate-100">{difficulty}/5</div>
+                </div>
+                <div>
+                  <span className="uppercase tracking-wide text-slate-400">Session Avg</span>
+                  <div className="font-semibold text-slate-100">{sessionAvg}/10</div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="flex cursor-pointer items-center gap-2">
+                    <input
+                      type="checkbox"
+                      className="h-4 w-4 rounded border-slate-600 bg-slate-900 text-blue-500"
+                      checked={timedOn}
+                      onChange={(e) => {
+                        setTimedOn(e.target.checked);
+                        setTimeLeft(null);
+                      }}
+                    />
+                    <span>Timed pressure</span>
+                  </label>
+                  {timedOn && (
+                    <>
+                      <input
+                        className="w-16 rounded-lg border border-slate-700 bg-slate-900 px-2 py-1 text-xs text-slate-100 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 md:text-sm"
+                        type="number"
+                        min={15}
+                        max={180}
+                        value={timedSeconds}
+                        onChange={(e) => setTimedSeconds(Number(e.target.value))}
+                      />
+                      <span className="text-slate-400">sec</span>
+                      <div className="flex items-center gap-1 rounded-full bg-slate-800 px-3 py-1 text-xs font-semibold text-slate-100 md:text-sm">
+                        <span>⏱</span>
+                        <span>{timeLeft === null ? formatTime(timedSeconds) : formatTime(timeLeft)}</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
 
-            <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-              <label style={{ display: "flex", gap: 8, alignItems: "center", cursor: "pointer" }}>
-                <input
-                  type="checkbox"
-                  checked={timedOn}
-                  onChange={(e) => {
-                    setTimedOn(e.target.checked);
-                    setTimeLeft(null);
+          <button
+            onClick={() => {
+              if (mode === "dpe") startDPE();
+              else {
+                setMessages([]);
+                setTotalQuestions(0);
+              }
+            }}
+            className="rounded-xl bg-gradient-to-r from-blue-500 to-sky-400 px-4 py-2 text-xs font-semibold text-slate-950 shadow-soft-glow hover:from-blue-400 hover:to-sky-300 md:text-sm"
+          >
+            {mode === "dpe" ? "Start New DPE Scenario" : "New Study Session"}
+          </button>
+        </section>
+
+        {/* Main grid layout */}
+        <main className="flex flex-1 flex-col gap-4 lg:flex-row">
+          {/* Left column: AI Tutor + Scenario */}
+          <div className="flex flex-1 flex-col gap-4">
+            {/* AI tutor chat panel */}
+            <section className="flex h-[340px] flex-1 flex-col rounded-2xl border border-slate-800 bg-slate-900/70 p-4 shadow-soft-glow backdrop-blur md:h-[380px]">
+              <div className="mb-3 flex items-center justify-between gap-2">
+                <div>
+                  <h2 className="text-sm font-semibold text-slate-100 md:text-base">AI Tutor</h2>
+                  <p className="text-xs text-slate-400 md:text-xs">
+                    Ask FAA questions or answer scenario prompts. Responses are grounded in ACS.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-slate-400">
+                  <span className="inline-flex h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
+                  <span>{mode === "dpe" ? "Exam mode" : "Study mode"}</span>
+                </div>
+              </div>
+
+              <div className="relative flex-1 overflow-hidden rounded-xl border border-slate-800 bg-slate-950/60">
+                <div className="flex h-full flex-col gap-3 overflow-y-auto p-3 pr-2 text-sm">
+                  {messages.map((msg, index) => (
+                    <div
+                      key={index}
+                      ref={index === messages.length - 1 ? chatEndRef : undefined}
+                      className={`max-w-[80%] rounded-2xl px-3 py-2 text-xs md:text-sm ${
+                        msg.role === "user"
+                          ? "ml-auto bg-gradient-to-r from-blue-500 to-sky-400 text-slate-950"
+                          : "mr-auto bg-slate-800/90 text-slate-100"
+                      } markdown`}
+                    >
+                      <ReactMarkdown>{msg.content}</ReactMarkdown>
+                    </div>
+                  ))}
+
+                  {loading && (
+                    <div className="mr-auto flex items-center gap-2 rounded-2xl bg-slate-800/80 px-3 py-2 text-xs text-slate-200 md:text-sm">
+                      <span className="h-2 w-2 animate-ping rounded-full bg-blue-400" />
+                      <span>{mode === "dpe" ? "Evaluating answer..." : "Thinking..."}</span>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-3 flex flex-col gap-2">
+                <textarea
+                  className="h-20 w-full resize-none rounded-xl border border-slate-700 bg-slate-950/80 px-3 py-2 text-sm text-slate-100 outline-none ring-0 placeholder:text-slate-500 focus:border-blue-500 focus:ring-1 focus:ring-blue-500 md:h-24"
+                  placeholder={mode === "dpe" ? "Answer the examiner in your own words..." : "Ask an FAA question..."}
+                  value={question}
+                  onChange={(e) => setQuestion(e.target.value)}
+                  onFocus={() => {
+                    if (mode === "dpe" && timedOn) setTimeLeft(timedSeconds);
                   }}
                 />
-                Timed Pressure
-              </label>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs text-slate-400">
+                    {mode === "dpe"
+                      ? "Your response will be graded against the ACS."
+                      : "Grounded explanations with ACS references."}
+                  </span>
+                  <button
+                    onClick={() => askAI(false)}
+                    className="inline-flex items-center gap-2 rounded-xl bg-blue-500 px-4 py-2 text-xs font-semibold text-slate-50 shadow hover:bg-blue-400 md:text-sm"
+                  >
+                    <span>{mode === "dpe" ? "Submit answer" : "Ask AI"}</span>
+                  </button>
+                </div>
+              </div>
+            </section>
 
-              {timedOn && (
-                <>
-                  <input
-                    style={styles.secondsInput}
-                    type="number"
-                    min={15}
-                    max={180}
-                    value={timedSeconds}
-                    onChange={(e) => setTimedSeconds(Number(e.target.value))}
-                  />
-                  <span style={{ opacity: 0.8 }}>sec</span>
+            {/* Scenario training panel */}
+            <section className="grid grid-cols-1 gap-4 rounded-2xl border border-slate-800 bg-slate-900/70 p-4 text-sm backdrop-blur md:grid-cols-2">
+              <div>
+                <h3 className="mb-1 text-sm font-semibold text-slate-100 md:text-base">Scenario Training</h3>
+                <p className="mb-3 text-xs text-slate-400 md:text-xs">
+                  Use DPE mode to practice scenario-based oral questions under realistic pressure.
+                </p>
+                <ul className="mb-3 list-disc space-y-1 pl-4 text-xs text-slate-300 md:text-xs">
+                  <li>Examiner-style questioning aligned with FAA ACS.</li>
+                  <li>Difficulty adapts with your performance.</li>
+                  <li>Optional countdown timer to simulate checkride stress.</li>
+                </ul>
+                <button
+                  onClick={() => {
+                    setMode("dpe");
+                    startDPE();
+                  }}
+                  className="mt-1 rounded-lg bg-amber-500 px-3 py-1.5 text-xs font-semibold text-slate-950 shadow hover:bg-amber-400 md:text-sm"
+                >
+                  Jump into DPE scenario
+                </button>
+              </div>
 
-                  <div style={styles.timerPill}>
-                    ⏱ {timeLeft === null ? formatTime(timedSeconds) : formatTime(timeLeft)}
+              <div className="flex flex-col justify-between gap-3 rounded-xl border border-dashed border-slate-700 bg-slate-950/60 p-3 text-xs text-slate-300 md:text-xs">
+                <div>
+                  <p className="mb-2 font-semibold text-slate-100">Current session</p>
+                  <p>Mode: {mode === "dpe" ? "DPE Oral Exam" : "Study"}</p>
+                  <p>Difficulty: {difficulty}/5</p>
+                  <p>Session average (DPE): {sessionAvg}/10</p>
+                  <p>Questions this session: {totalQuestions}</p>
+                </div>
+                <div className="space-y-1">
+                  <p className="font-semibold text-slate-100">Training focus</p>
+                  <p>Use analytics to track which ACS areas you consistently miss and rotate topics accordingly.</p>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          {/* Right column: Student progress */}
+          <aside className="flex w-full flex-col gap-4 lg:w-[380px]">
+            {/* Student progress dashboard */}
+            <section className="rounded-2xl border border-slate-800 bg-slate-900/70 p-4 text-sm backdrop-blur">
+              <h3 className="mb-1 text-sm font-semibold text-slate-100 md:text-base">Student Progress</h3>
+              <p className="mb-3 text-xs text-slate-400">
+                Quick snapshot of how this session is going. Detailed analytics are available on the Analytics page.
+              </p>
+
+              <div className="space-y-3 text-xs text-slate-200 md:text-sm">
+                <div>
+                  <div className="mb-1 flex items-center justify-between">
+                    <span>Questions answered</span>
+                    <span className="font-semibold">{totalQuestions}</span>
                   </div>
-                </>
-              )}
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-800">
+                    <div
+                      className="h-full rounded-full bg-blue-500"
+                      style={{ width: `${Math.min(100, totalQuestions * 10)}%` }}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <div className="mb-1 flex items-center justify-between">
+                    <span>Current DPE difficulty</span>
+                    <span className="font-semibold">
+                      {difficulty}/5 {mode !== "dpe" && <span className="text-xs text-slate-400">(latest)</span>}
+                    </span>
+                  </div>
+                  <div className="h-1.5 w-full overflow-hidden rounded-full bg-slate-800">
+                    <div
+                      className="h-full rounded-full bg-amber-400"
+                      style={{ width: `${(difficulty / 5) * 100}%` }}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <div className="mb-1 flex items-center justify-between">
+                    <span>DPE session average</span>
+                    <span className="font-semibold">{sessionAvg.toFixed(1)}/10</span>
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    Target a consistent score above 8/10 before booking the real checkride.
+                  </p>
+                </div>
+              </div>
+            </section>
+          </aside>
+        </main>
+
+        {/* Aircraft Training Lab */}
+        <section className="mt-4 rounded-2xl border border-slate-800 bg-cockpit-900/80 p-4 shadow-soft-glow backdrop-blur">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-100 md:text-base">Aircraft Training Lab</h2>
+              <p className="text-xs text-slate-400">
+                Explore common training aircraft, visualize the airframe in 3D, and brief key cockpit instruments.
+              </p>
+            </div>
+            <div className="flex items-center gap-2 text-[11px] text-slate-400">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
+              <span>Interactive 3D lab</span>
             </div>
           </div>
-        )}
 
-        <button
-          onClick={() => {
-            if (mode === "dpe") startDPE();
-            else setMessages([]);
-          }}
-          style={{ ...styles.button, marginBottom: "15px" }}
-        >
-          New Session
-        </button>
+          {/* Row 1: Airframe explorer */}
+          <div className="mb-4 grid gap-4 md:grid-cols-[minmax(0,1.1fr)_minmax(0,1.4fr)_minmax(0,1.1fr)]">
+            {/* Left: selector */}
+            <AirframeSelector selectedId={selectedAircraft} onSelect={setSelectedAircraft} />
 
-        <div style={styles.chatContainer}>
-          {messages.map((msg, index) => (
-            <div
-              key={index}
-              style={msg.role === "user" ? styles.userBubble : styles.aiBubble}
-              className="markdown"
-            >
-              <ReactMarkdown>{msg.content}</ReactMarkdown>
+            {/* Center: 3D viewer */}
+            <AircraftViewer selectedId={selectedAircraft} />
+
+            {/* Right: cockpit hotspots / info */}
+            <CockpitHotspots selectedId={selectedAircraft} />
+          </div>
+
+          {/* Row 2: Interactive Cockpit Trainer — instruments ~60% width, explanation ~40% */}
+          <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1.5fr)_minmax(0,1fr)]">
+            {/* Left: cockpit aircraft selector */}
+            <CockpitAircraftSelector selectedId={selectedAircraft} onSelect={setSelectedAircraft} />
+
+            {/* Center: cockpit six-pack panel (~60% of center+right) */}
+            <CockpitPanel selectedInstrumentId={selectedInstrument} onSelectInstrument={setSelectedInstrument} />
+
+            {/* Right: instrument description + AI tutor (~40%) */}
+            <InstrumentInfoPanel selectedInstrumentId={selectedInstrument} />
+          </div>
+        </section>
+
+        {/* Cockpit Simulator */}
+        <section className="mt-4 rounded-2xl border border-slate-800 bg-slate-900/80 p-4 shadow-soft-glow backdrop-blur">
+          <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-semibold text-slate-100 md:text-base">Cockpit Simulator</h2>
+              <p className="text-xs text-slate-400">
+                Switch between a six-pack cockpit trainer, external aircraft viewer, and focused study mode.
+              </p>
             </div>
-          ))}
+            <div className="flex items-center gap-2 text-[11px] text-slate-300">
+              <div className="flex gap-1 rounded-full bg-slate-900/80 p-1">
+                <button
+                  type="button"
+                  onClick={() => setCockpitSimTab("trainer")}
+                  className={`rounded-full px-3 py-1 text-[11px] font-medium ${
+                    cockpitSimTab === "trainer"
+                      ? "bg-blue-500 text-slate-950 shadow-soft-glow"
+                      : "text-slate-300 hover:bg-slate-800"
+                  }`}
+                >
+                  Cockpit Trainer
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCockpitSimTab("viewer")}
+                  className={`rounded-full px-3 py-1 text-[11px] font-medium ${
+                    cockpitSimTab === "viewer"
+                      ? "bg-sky-500 text-slate-950 shadow-soft-glow"
+                      : "text-slate-300 hover:bg-slate-800"
+                  }`}
+                >
+                  Aircraft Viewer
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCockpitSimTab("study")}
+                  className={`rounded-full px-3 py-1 text-[11px] font-medium ${
+                    cockpitSimTab === "study"
+                      ? "bg-emerald-500 text-slate-950 shadow-soft-glow"
+                      : "text-slate-300 hover:bg-slate-800"
+                  }`}
+                >
+                  Study Mode
+                </button>
+              </div>
+            </div>
+          </div>
 
-          {loading && (
-            <div style={styles.aiBubble}>
-              {mode === "dpe" ? "Evaluating..." : "Thinking..."}
+          {cockpitSimTab === "trainer" && (
+            <C172Cockpit
+              selectedInstrumentId={selectedInstrument}
+              onSelectInstrument={setSelectedInstrument}
+            />
+          )}
+
+          {cockpitSimTab === "viewer" && (
+            <div className="mt-1">
+              <AircraftViewer selectedId={selectedAircraft} />
             </div>
           )}
 
-          <div ref={chatEndRef} />
-        </div>
-
-        <textarea
-          placeholder={mode === "dpe" ? "Answer the examiner..." : "Ask an FAA question..."}
-          value={question}
-          onChange={(e) => setQuestion(e.target.value)}
-          style={styles.textarea}
-          onFocus={() => {
-            if (mode === "dpe" && timedOn) setTimeLeft(timedSeconds);
-          }}
-        />
-
-        <button onClick={() => askAI(false)} style={styles.button}>
-          {mode === "dpe" ? "Submit Answer" : "Ask"}
-        </button>
+          {cockpitSimTab === "study" && (
+            <div className="mt-1 grid gap-4 md:grid-cols-[minmax(0,1.5fr)_minmax(0,1fr)]">
+              <CockpitPanel
+                selectedInstrumentId={selectedInstrument}
+                onSelectInstrument={setSelectedInstrument}
+              />
+              <InstrumentInfoPanel selectedInstrumentId={selectedInstrument} />
+            </div>
+          )}
+        </section>
       </div>
     </div>
   );
 }
-
-const styles: Record<string, any> = {
-  container: {
-    minHeight: "100vh",
-    background: "linear-gradient(135deg, #0f172a, #1e3a8a)",
-    padding: 40,
-    color: "white",
-  },
-  content: { maxWidth: 900, margin: "0 auto" },
-  topBar: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 },
-  topRight: { display: "flex", gap: 10 },
-  title: { marginBottom: 0, fontSize: 26 },
-
-  modeSelector: { display: "flex", gap: 10, marginBottom: 14 },
-  modeButton: {
-    padding: "8px 16px",
-    borderRadius: 10,
-    border: "1px solid rgba(255,255,255,0.2)",
-    background: "transparent",
-    color: "white",
-    cursor: "pointer",
-  },
-  activeMode: {
-    padding: "8px 16px",
-    borderRadius: 10,
-    border: "none",
-    background: "linear-gradient(90deg,#2563eb,#3b82f6)",
-    color: "white",
-    fontWeight: 700,
-  },
-
-  hud: {
-    display: "flex",
-    justifyContent: "space-between",
-    gap: 12,
-    padding: 14,
-    borderRadius: 14,
-    background: "rgba(30, 41, 59, 0.75)",
-    border: "1px solid rgba(255,255,255,0.08)",
-    marginBottom: 14,
-    alignItems: "center",
-  },
-  hudLabel: { fontSize: 11, opacity: 0.7 },
-  hudValue: { fontSize: 18, fontWeight: 700 },
-
-  secondsInput: {
-    width: 70,
-    padding: "6px 8px",
-    borderRadius: 10,
-    border: "1px solid rgba(255,255,255,0.2)",
-    background: "rgba(255,255,255,0.06)",
-    color: "white",
-    outline: "none",
-  },
-  timerPill: {
-    padding: "6px 10px",
-    borderRadius: 999,
-    background: "rgba(59,130,246,0.2)",
-    border: "1px solid rgba(59,130,246,0.45)",
-    fontWeight: 700,
-  },
-
-  chatContainer: { display: "flex", flexDirection: "column", gap: 15, marginBottom: 20 },
-  userBubble: {
-    alignSelf: "flex-end",
-    background: "linear-gradient(90deg, #2563eb, #3b82f6)",
-    padding: "12px 16px",
-    borderRadius: 14,
-    maxWidth: "75%",
-  },
-  aiBubble: {
-    alignSelf: "flex-start",
-    backgroundColor: "rgba(30, 41, 59, 0.9)",
-    padding: 16,
-    borderRadius: 14,
-    maxWidth: "85%",
-    boxShadow: "0 10px 30px rgba(0,0,0,0.4)",
-  },
-  textarea: {
-    width: "100%",
-    height: 110,
-    padding: 12,
-    borderRadius: 12,
-    border: "1px solid rgba(255,255,255,0.1)",
-    backgroundColor: "rgba(255,255,255,0.05)",
-    color: "white",
-    marginBottom: 15,
-    resize: "none",
-    outline: "none",
-  },
-  button: {
-    padding: "10px 25px",
-    borderRadius: 10,
-    border: "none",
-    background: "linear-gradient(90deg, #3b82f6, #2563eb)",
-    color: "white",
-    fontWeight: 700,
-    cursor: "pointer",
-  },
-  smallBtn: {
-    padding: "8px 12px",
-    borderRadius: 10,
-    border: "1px solid rgba(255,255,255,0.2)",
-    background: "transparent",
-    color: "white",
-    cursor: "pointer",
-  },
-};
